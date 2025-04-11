@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>인사이드 아웃</title>
+    <style>
+        /* 화면 레이아웃 */
+        #container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: row; /* 이미지와 웹캠을 가로로 배치 */
+            position: relative;
+        }
+        #left, #right {
+            width: 40%;
+            text-align: center;
+            position: relative;
+        }
+        #emotion-image {
+            width: 100%;
+            max-width: 400px;
+            transform: translateX(150px); /* 중앙에서 왼쪽으로 살짝 이동 */
+        }
+        #webcam {
+            width: 100%;
+            max-width: 400px;
+            transform: translateX(140px); /* 중앙에서 오른쪽으로 살짝 이동 */
+        }
+        #emotion-result {
+            font-size: 24px;
+            font-weight: bold;
+            color: red;
+            margin-top: 20px;
+            position: absolute;
+            bottom: 10px; /* 하단에서 약간 위로 */
+            text-align: center;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="left">
+            <img id="emotion-image" src="" alt="표정 이미지" style="display: none;">
+        </div>
+        <div id="right">
+            <video id="webcam" autoplay playsinline style="display: none;"></video>
+        </div>
+        <p id="emotion-result"></p> <!-- 성공/실패 메시지를 페이지 맨 아래에 위치 -->
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const emotionImage = document.getElementById('emotion-image');
+        const emotionResult = document.getElementById('emotion-result');
+        
+        const imageList = [
+            { src: "/static/images/happy1.png", emotion: "happy" },
+            { src: "/static/images/sad1.png", emotion: "sad" },
+            { src: "/static/images/angry1.png", emotion: "angry" }
+        ];
+        let targetEmotion = "";
+        let successCount = 0;
+        
+        // 이미지 랜덤 선택 및 설정
+        function showRandomImage() {
+            const randomIndex = Math.floor(Math.random() * imageList.length);
+            const selectedImage = imageList[randomIndex];
+            emotionImage.src = selectedImage.src;
+            targetEmotion = selectedImage.emotion; // 이미지에 맞는 감정 설정
+            emotionImage.style.display = "block";
+            emotionResult.textContent = ""; // 결과 초기화
+        }
+
+        // 웹캠 스트림 시작
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.style.display = "block"; // 웹캠 표시
+            } catch (err) {
+                console.error('웹캠 접근 오류:', err);
+            }
+        }
+
+        // 이미지 캡처하여 Base64 인코딩
+        function captureFrame() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg').split(',')[1]; // Base64 데이터 부분만 반환
+        }
+
+        // 서버로 이미지 전송하고 감정 분석
+        async function analyzeEmotion(base64Image) {
+            try {
+                const response = await fetch('http://localhost:5000/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: base64Image })
+                });
+                
+                if (!response.ok) throw new Error('서버 오류: ' + response.status);
+
+                const data = await response.json();
+                return data.emotions;
+            } catch (error) {
+                emotionResult.textContent = `오류 발생: ${error.message}`;
+                return [];
+            }
+        }
+
+        // 감정 분석 및 결과 처리
+        async function processEmotion() {
+            const base64Image = captureFrame();
+            const emotions = await analyzeEmotion(base64Image);
+
+            if (emotions.length > 0 && emotions[0] === targetEmotion) {
+                successCount += 1;
+                emotionResult.textContent = "통과!"; // 성공 시 메시지
+            } else {
+                successCount = 0; // 실패 시 초기화
+                emotionResult.textContent = "실패!"; // 실패 시 메시지
+            }
+
+            // 2회 성공 시 다음 이미지
+            if (successCount >= 2) {
+                successCount = 0;
+                startEmotionTest();
+            }
+        }
+
+        // 감정 분석 시작 및 조건에 따라 다음 이미지로 이동
+        function startEmotionTest() {
+            showRandomImage(); // 새로운 이미지 및 목표 감정 설정
+
+            setTimeout(async () => {
+                await startWebcam(); // 웹캠 시작
+                setInterval(processEmotion, 1000); // 매초 감정 분석
+            }, 5000); // 5초 대기 후 웹캠 시작
+
+            // 20초 후 자동 다음 이미지로 넘어가기
+            setTimeout(() => {
+                successCount = 0;
+                startEmotionTest();
+            }, 20000); // 20초 동안 표정 유지
+        }
+
+        // 초기 실행
+        window.onload = startEmotionTest;
+    </script>
+</body>
+</html>
